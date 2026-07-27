@@ -1,0 +1,11 @@
+# Weekly Demand Planning digest service (all free-tier friendly)
+groq>=0.13.0              # generation (generous free tier)
+supabase>=2.9.0           # snapshots + generated digests (free tier)
+python-dotenv>=1.0.1      # load .env config
+
+# Trust the OS cert store (corporate TLS interception / proxies)
+truststore>=0.10.0
+
+# Web service
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0

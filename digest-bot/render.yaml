@@ -1,0 +1,31 @@
+# Render Blueprint — deploy the Demand Planning digest as a free web service.
+# In Render: New + -> Blueprint -> connect this repo. Then set the `sync: false`
+# secrets in the dashboard (they are NOT stored in git).
+#
+# This is a SEPARATE service from the RAG bot: its own URL, its own env vars, its
+# own Teams channel. Do not reuse the RAG service's DEMAND_* or token values.
+services:
+  - type: web
+    name: demand-digest-bot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_CHAT_MODEL
+        value: llama-3.3-70b-versatile
+      - key: DEMAND_TREND_WEEKS
+        value: "8"
+      - key: DEMAND_SNAPSHOT_PC_LIMIT
+        value: "500"
+      - key: DEMAND_TOP_N
+        value: "8"
+      # Secrets — set these in the Render dashboard (sync: false = not in repo):
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: DEMAND_DIGEST_TOKEN
+        sync: false
