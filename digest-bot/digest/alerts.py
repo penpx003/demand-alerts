@@ -233,12 +233,43 @@ def _get(row: dict[str, Any], canonical: dict[str, Any], key: str) -> Any:
     return row.get(key)
 
 
+class AlertColumnMismatch(ValueError):
+    """An alert table arrived without the columns that alert is defined by."""
+
+
+def _check_columns(alert: str, spec: AlertSpec, sample: dict[str, Any]) -> None:
+    """Reject a table that is not the alert it was sent as.
+
+    All four alert tables share Market / Product / Customer, so a mis-wired
+    Power Automate body produces a digest that looks entirely plausible while
+    describing the wrong alert — the alert-specific columns simply come back
+    empty. Checking the identifying columns turns that into a loud failure.
+    """
+    keys = {normalise_key(k) for k in sample}
+    missing = [f for f in (spec.metric_field, spec.volume_field) if f not in keys]
+    if not missing:
+        return
+
+    raise AlertColumnMismatch(
+        f"The rows sent as '{alert}' do not look like {spec.title}. "
+        f"Expected column(s) {missing} were not found. "
+        f"Columns received: {sorted(str(k) for k in sample if not str(k).startswith('@'))}. "
+        f"This usually means the Power Automate HTTP body maps the wrong "
+        f"'List rows present in a table' output to '{alert}' — check that each "
+        f"alertN key references the action reading that alert's own table."
+    )
+
+
 def parse_rows(alert: str, raw_rows: Iterable[dict[str, Any]]) -> list[AlertRow]:
     """Normalise the rows of one alert table as delivered by Power Automate."""
     spec = ALERT_SPECS[alert]
     out: list[AlertRow] = []
+    checked = False
 
     for row in raw_rows:
+        if isinstance(row, dict) and not checked:
+            _check_columns(alert, spec, row)
+            checked = True
         if not isinstance(row, dict):
             continue
         canonical = {normalise_key(k): v for k, v in row.items()}

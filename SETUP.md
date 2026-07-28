@@ -302,15 +302,53 @@ git status --short          # .env must NOT appear
 git ls-files | Select-String "\.env$"   # must return nothing
 ```
 
-Create an empty repo on GitHub (for example `demand-alerts`), then:
+Create an **empty** repo on GitHub — no README, no .gitignore, no licence. You
+already have both, and letting GitHub add its own creates a commit yours doesn't
+have, which makes the first push bounce.
+
+> ⚠️ **Ignore the "…or create a new repository on the command line" snippet that
+> GitHub shows you.** It is written for bash and will damage this repo in two
+> ways. `echo "# demand-alerts" >> README.md` in PowerShell writes **UTF-16**, so
+> git stops seeing README.md as text and commits it as a binary blob. And it runs
+> `git init` + `git commit` again over work you have already committed.
+
+Set the remote with `set-url`, which works whether or not a remote already exists
+— plain `git remote add` fails with *"remote origin already exists"* and, worse,
+leaves the old wrong URL in place:
 
 ```powershell
-git remote add origin https://github.com/<you>/demand-alerts.git
+git remote add origin https://github.com/YOUR-USERNAME/demand-alerts.git 2>$null
+git remote set-url origin https://github.com/YOUR-USERNAME/demand-alerts.git
+git remote -v          # confirm BOTH lines show your real username
 git branch -M main
 git push -u origin main
 ```
 
-> ✅ **Checkpoint.** Repo pushed, `.env` not in it.
+Replace `YOUR-USERNAME` with your actual GitHub username. Check `git remote -v`
+before pushing — a placeholder left in the URL fails with a bare
+`error: 400`, which does not hint at the cause.
+
+**If the push is rejected** ("fetch first" / non-fast-forward), the GitHub repo
+has a commit yours doesn't — usually a README added at creation:
+
+```powershell
+git pull --rebase origin main
+git push -u origin main
+```
+
+**Commit identity.** If git says *"Your name and email address were configured
+automatically"*, it guessed from your Windows account. Commits will not be linked
+to your GitHub profile unless the email is registered there:
+
+```powershell
+git config --global user.name "Your Name"
+git config --global user.email "the-email-on-your-github-account"
+```
+
+This affects future commits only.
+
+> ✅ **Checkpoint.** `git remote -v` shows your real username, push succeeded,
+> `.env` is not in the repo, README.md still renders as text on GitHub.
 
 ---
 
@@ -340,11 +378,27 @@ The repo holds both halves, so point Render at the `digest-bot` subfolder.
 
 5. **Create Web Service** and wait for the build.
 
-Verify against the live URL:
+### Get your real URL
+
+When the deploy finishes, the service page shows the URL directly under the service
+name, next to the status badge. **Copy it from there — do not assume it matches the
+service name.** `*.onrender.com` subdomains are globally unique, so if the name was
+already taken Render appends a suffix, e.g. `demand-digest-bot-a7x9.onrender.com`.
+
+Wait for the status badge to read **Live**, then verify (substituting your own URL):
 
 ```powershell
-Invoke-RestMethod -Uri https://<your-service>.onrender.com/health
+Invoke-RestMethod -Uri https://YOUR-SERVICE.onrender.com/health
 ```
+
+Expect `status : ok`.
+
+A `404` with the header `x-render-routing: no-server` means nothing is bound to that
+hostname — you have the wrong URL, or the service has not gone Live yet. That is
+different from your app returning 404.
+
+If the build failed, open the **Logs** tab. `Dockerfile not found` means **Root
+Directory** is not set to `digest-bot`.
 
 > **Cold start.** Free instances sleep after ~15 minutes idle, and the next
 > request takes around 30 seconds. That is harmless for a weekly scheduled flow —
@@ -360,6 +414,31 @@ the simpler route for this monorepo.
 ---
 
 ## Phase 6 — Power Automate flow
+
+> ⚠️ **All five Excel actions must point at the SAME file.** The `Run script`
+> step and the four `List rows present in a table` steps each store their own
+> file reference. If they diverge, the script builds the tables in one workbook
+> while the flow reads another, and every `List rows` step fails with "No table
+> was found" even though the tables plainly exist.
+>
+> Verify with **⋯ → Peek code** on each action and compare the `metadata` path,
+> e.g. `"/Ai Agents/DBAlerts.xlsx"`. All five must match.
+>
+> ⚠️ **Prerequisite: all four tables must already exist in the workbook.**
+> Step 2 of the flow creates them at runtime, but Power Automate validates the
+> `List rows present in a table` references when you **save** the flow — so the
+> flow cannot be saved until the tables are there. Run the Office Script by hand
+> first (Phase 1) and confirm with `ListTables.ts` that all four are FOUND.
+>
+> Saving before then fails with:
+> `The dynamic operation request to API 'excelonlinebusiness' operation 'GetTable'
+> failed with status code 'NotFound'` / `ItemNotFound`.
+>
+> The same error appears if the **File** reference is stale — the workbook was
+> renamed or moved, or was picked from a different library. `ItemNotFound` in
+> Graph refers to the file as often as the table. If the tables definitely exist,
+> re-pick Location → Document Library → File from scratch on each action instead
+> of editing the existing values.
 
 ### 6.1 Create the flow
 
@@ -379,6 +458,19 @@ Add **Excel Online (Business) → Run script**.
 
 This rebuilds the four worksheets, so the digest never reads last week's output.
 
+### 6.2b — Delay (required)
+
+Add a **Delay** action of **1 minute** immediately after `Run script`.
+
+> This is not padding. The Excel connector can serve a cached view of the workbook
+> from *before* the script rebuilt the sheets, so the next action fails with
+> `No table was found` for a table that demonstrably exists — the script cannot
+> even finish without creating it. The delay lets the rebuilt workbook settle.
+>
+> Symptom without it: `Run script` reports **Succeeded**, and the very next
+> `List rows` step fails on a missing table. If you ever see that combination,
+> the answer is the delay, not the table.
+
 ### 6.3 Steps 3–6 — read the four tables
 
 Add **Excel Online (Business) → List rows present in a table** four times, same
@@ -390,6 +482,29 @@ workbook each time, one per table:
 | 4 | `tblAlert2AccuracyBias` |
 | 5 | `tblAlert3ForecastVsSales` |
 | 6 | `tblAlert4StatVsFDP` |
+
+> ⚠️ **Type the table name — never pick it from the dropdown.**
+>
+> Choosing a table from the picker makes Power Automate store its internal
+> **table ID**, a GUID like `{2BD3FE1D-C6C1-446F-AA6E-D43731BDD673}`. Step 2
+> deletes and recreates each worksheet on every run, so the rebuilt table gets a
+> **new GUID** and the flow keeps looking for the old one. It works once, then
+> fails every week after with:
+>
+> `No table was found with the name '{2BD3FE1D-...}'`
+>
+> Table *names* are stable across the rebuild, so bind by name instead. On the
+> **Table** field:
+>
+> - **New designer**: click the field, then the small toggle on the right of the
+>   dropdown to switch it to free text (tooltip *"Switch to input entire array"*
+>   or a pencil / `fx` icon), and type the name.
+> - **Classic designer**: open the dropdown and choose **Enter custom value**,
+>   then type the name.
+>
+> The field must end up showing the literal text `tblAlert1FDPChange`, not a
+> GUID and not a friendly display name. The **File** field is fine as an item ID
+> — the workbook is never recreated, only its sheets.
 
 **On every one of these four actions**, open the **⋯ menu → Settings** and turn
 **Pagination** *on*, with **Threshold** set to something comfortably above your
@@ -405,7 +520,9 @@ row count (e.g. `5000`).
 Add an **HTTP** action.
 
 - **Method**: `POST`
-- **URI**: `https://<your-service>.onrender.com/api/demand-digest`
+- **URI**: `https://YOUR-SERVICE.onrender.com/api/demand-digest` — the exact URL
+  from your Render service page (Phase 5), not the service name.
+  *This deployment:* `https://demand-alerts.onrender.com/api/demand-digest`
 - **Headers**:
 
   | Key | Value |
@@ -440,8 +557,21 @@ Add **Microsoft Teams → Post message in a chat or channel**.
 - **Post as**: Flow bot
 - **Post in**: Channel
 - **Team / Channel**: your Demand Planning team and channel
-- **Message**: `body('HTTP')?['narrative_html']`
+- **Message**: must be entered as an **expression**, not typed as text:
 
+  ```text
+  body('HTTP')?['narrative_html']
+  ```
+
+> ⚠️ **Enter this via the Expression tab.** Click the Message box, open the
+> dynamic-content panel, switch to the **Expression** (`fx`) tab, paste the line
+> above, and click **OK / Add**. The box should then show a small named token,
+> not the raw text.
+>
+> Typing `body('HTTP')?['narrative_html']` straight into the message box posts
+> that string to the channel *literally* — the team receives the formula instead
+> of the digest.
+>
 > Use **`narrative_html`**, not `narrative`. The Teams action treats the message
 > as HTML, so the markdown version would post literal `**` around every heading.
 > `narrative_html` is the same text with `<b>`, `<p>` and `<ul>` applied.
@@ -505,7 +635,8 @@ not guarantees. The spot-check in Phase 7 is what catches a drifting model.
 | Symptom | Cause |
 |---|---|
 | `401 Unauthorized` | `X-Digest-Token` missing or not matching `DEMAND_DIGEST_TOKEN` on Render. |
-| `List rows` step fails, table not found | The Office Script did not run, or a table was renamed. Table names are in Phase 1.6. |
+| `No table was found with the name '{GUID}'` | The Table field holds a table **ID**, not a name. The script recreates the tables each run, so the ID changes every time. Retype the field as the literal table name — see 6.3. |
+| `List rows` step fails, table not found by name | The Office Script did not run, or a table was renamed. Table names are in Phase 1.6. |
 | Exactly 256 rows per alert | Pagination is off. See 6.3. |
 | Narrative never reports anything recurring | Migration not applied, or wrong Supabase key. Check the Render log for `snapshot/trend step failed`. |
 | `snapshot_rows_stored: 0` | Same cause. |

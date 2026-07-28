@@ -2,7 +2,7 @@
  * ============================================================================
  * DEMAND PLANNING ALERTS  —  Microsoft Office Script (Excel Automate)
  * ============================================================================
- * Version  : 1.2
+ * Version  : 1.3
  * Runs on  : Excel for the web / desktop, Automate tab, "New Script"
  * Workbook : DemandAlertsScripts
  * Source   : worksheet "DBAlerts" (IBP CSV extract)
@@ -132,7 +132,18 @@ const FMT_PERCENT: string = "0.0%";
 const FMT_VOLUME: string = "#,##0";
 const FMT_DATE: string = "dd/mm/yyyy";
 const MAX_DESCRIPTION_COLUMN_WIDTH: number = 240; // points
-const WRITE_CHUNK_ROWS: number = 25000;
+
+/**
+ * The payload limit applies to WRITES as well as reads. Alert 1 is the largest
+ * output (one row per combination per future week), so it is the first to hit it
+ * — and because it is published first, a failure there leaves the other three
+ * worksheets showing stale results from the previous run.
+ *
+ * Output is therefore written in blocks of roughly this many cells, halving and
+ * retrying if a block is still too large.
+ */
+const WRITE_CHUNK_CELLS: number = 100000;
+const MIN_WRITE_CHUNK_ROWS: number = 50;
 
 /**
  * Office Scripts caps the payload of a single API call, so the source CANNOT be
@@ -485,6 +496,8 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
     const alert4: AlertOutput = runAlert4(productCustomerMap, productMap, counters);
     publishAlert(workbook, OUT_SHEET_ALERT4, OUT_TABLE_ALERT4, alert4);
     outputSheets.push(OUT_SHEET_ALERT4);
+
+    verifyOutputTables(workbook);
 
     /* ---- 3.6 Summary ---------------------------------------------------- */
     const summary: ExecutionSummary = {
@@ -1864,6 +1877,34 @@ function runAlert4(
  * 13. OUTPUT MANAGEMENT
  * =========================================================================*/
 
+/**
+ * Confirms every output table exists before the script reports success.
+ *
+ * Without this, a failure part-way through publishing leaves some worksheets
+ * holding the PREVIOUS run's results while the script still looks like it
+ * worked — and the downstream flow then reads stale data, or fails on a table
+ * that was never created. Better to fail loudly here.
+ */
+function verifyOutputTables(workbook: ExcelScript.Workbook): void {
+    const expected: string[] = [
+        OUT_TABLE_ALERT1, OUT_TABLE_ALERT2, OUT_TABLE_ALERT3, OUT_TABLE_ALERT4
+    ];
+    const missing: string[] = [];
+    for (let i: number = 0; i < expected.length; i++) {
+        if (!workbook.getTable(expected[i])) {
+            missing.push(expected[i]);
+        }
+    }
+    if (missing.length > 0) {
+        throw new Error(
+            "Output incomplete — these tables were not created: " + missing.join(", ") +
+            ". Worksheets from a previous run may still be present and STALE. " +
+            "Re-run the script; if it fails again, lower WRITE_CHUNK_CELLS."
+        );
+    }
+    console.log("All four output tables verified present.");
+}
+
 function publishAlert(
     workbook: ExcelScript.Workbook,
     sheetName: string,
@@ -1920,17 +1961,7 @@ function writeOutputTable(
     // Header, then the body in one bulk write (chunked for very large results).
     sheet.getRangeByIndexes(0, 0, 1, columnCount).setValues([output.headers]);
 
-    if (rowCount <= WRITE_CHUNK_ROWS) {
-        sheet.getRangeByIndexes(1, 0, rowCount, columnCount).setValues(bodyRows);
-    } else {
-        let written: number = 0;
-        while (written < rowCount) {
-            const size: number = Math.min(WRITE_CHUNK_ROWS, rowCount - written);
-            sheet.getRangeByIndexes(1 + written, 0, size, columnCount)
-                .setValues(bodyRows.slice(written, written + size));
-            written += size;
-        }
-    }
+    writeRowsChunked(sheet, bodyRows, columnCount);
 
     const tableRange: ExcelScript.Range = sheet.getRangeByIndexes(0, 0, rowCount + 1, columnCount);
     const table: ExcelScript.Table = sheet.addTable(tableRange, true);
@@ -1951,6 +1982,46 @@ function writeOutputTable(
     }
 
     formatOutput(sheet, output, rowCount, columnCount);
+}
+
+/**
+ * Writes the body rows in blocks that stay under the payload limit, halving a
+ * block and retrying if it is still rejected. Mirrors readBlock.
+ */
+function writeRowsChunked(
+    sheet: ExcelScript.Worksheet,
+    rows: (string | number)[][],
+    columnCount: number
+): void {
+
+    const perChunk: number = Math.max(
+        MIN_WRITE_CHUNK_ROWS,
+        Math.floor(WRITE_CHUNK_CELLS / Math.max(1, columnCount))
+    );
+
+    let written: number = 0;
+    while (written < rows.length) {
+        let size: number = Math.min(perChunk, rows.length - written);
+        for (;;) {
+            try {
+                sheet.getRangeByIndexes(1 + written, 0, size, columnCount)
+                    .setValues(rows.slice(written, written + size));
+                break;
+            } catch (e) {
+                if (size <= MIN_WRITE_CHUNK_ROWS) {
+                    throw new Error(
+                        "Could not write output rows " + (written + 1) + "-" +
+                        (written + size) + " even at the minimum block size (" +
+                        MIN_WRITE_CHUNK_ROWS + " rows). Lower WRITE_CHUNK_CELLS. " +
+                        "Underlying error: " + String(e)
+                    );
+                }
+                size = Math.max(MIN_WRITE_CHUNK_ROWS, Math.floor(size / 2));
+                console.log("  write block too large; retrying with " + size + " rows");
+            }
+        }
+        written += size;
+    }
 }
 
 /** Placeholder body row for an alert that produced nothing this week. */

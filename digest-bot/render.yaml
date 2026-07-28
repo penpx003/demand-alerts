@@ -6,7 +6,9 @@
 # own Teams channel. Do not reuse the RAG service's DEMAND_* or token values.
 services:
   - type: web
-    name: demand-digest-bot
+    # Must match the existing service name, or a Blueprint deploy creates a
+    # second service instead of updating the live one.
+    name: demand-alerts
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile

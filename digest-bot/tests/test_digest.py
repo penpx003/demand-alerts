@@ -154,6 +154,38 @@ check(
     "total w-1 actual across Product-level rows" in brief,
 )
 
+print("\nmis-wired flow detection")
+from digest.alerts import AlertColumnMismatch  # noqa: E402
+
+# All four tables share Market/Product/Customer, so sending Alert 3's rows as
+# alert2 yields a plausible-looking digest with silently empty KPIs. Must raise.
+alert3_row = PAYLOAD["alerts"]["alert1"]["value"][0].copy()
+alert3_row.update({"Sales Last 4 Weeks": "40,000", "Forecast Next 4 Weeks": "10,000"})
+try:
+    parse_payload({"alerts": {"alert2": [alert3_row]}})
+    check("wrong table sent as alert2 is rejected", False, "no exception raised")
+except AlertColumnMismatch as e:
+    check("wrong table sent as alert2 is rejected", True)
+    check("error names the offending key", "alert2" in str(e))
+    check("error lists the columns received", "Market" in str(e))
+
+# The correct table must still pass.
+try:
+    parse_payload({"alerts": {"alert2": PAYLOAD["alerts"]["alert2"]}})
+    check("correctly wired alert2 still parses", True)
+except AlertColumnMismatch as e:
+    check("correctly wired alert2 still parses", False, str(e))
+
+# A table holding only the placeholder row still has the right columns.
+placeholder2 = {"Aggregation Level": "No alerts this week", "Market": "", "Product": "",
+                "Customer": "", "Accuracy Difference": "", "W-1 Actual": "",
+                "Alert Reason": ""}
+try:
+    n = len(parse_payload({"alerts": {"alert2": [placeholder2]}})["alert2"])
+    check("empty-alert placeholder passes the column check", n == 0)
+except AlertColumnMismatch as e:
+    check("empty-alert placeholder passes the column check", False, str(e))
+
 print("\nTeams HTML rendering")
 from digest.digest import to_teams_html  # noqa: E402
 
