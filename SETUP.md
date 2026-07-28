@@ -545,8 +545,26 @@ Add an **HTTP** action.
   ```
 
 Check the action names against your own flow — Power Automate suffixes duplicated
-actions `_2`, `_3`, `_4` in creation order, and if two of these point at the same
-table you will get a plausible-looking digest describing the wrong alert.
+actions `_2`, `_3`, `_4` in creation order.
+
+> ⚠️ **`alertN` must reference the action that reads `tblAlertN...`.** All four
+> tables share Market / Product / Customer, so a crossed wire yields a digest
+> that looks entirely normal while describing the wrong alert under each heading
+> — the alert-specific columns simply come back null. The service now rejects
+> this (`AlertColumnMismatch`), but the check can only fire when rows are
+> present: an `alertN` hardcoded to `[]` still passes and quietly reports
+> "no alerts this week".
+
+**Alternative body.** If the raw-JSON form fights you, build it as an expression.
+Rename each `List rows` action after its table first, so the mapping is
+self-evident:
+
+```text
+json(concat('{"week_of":"',formatDateTime(utcNow(),'yyyy-MM-dd'),'","alerts":{"alert1":',string(outputs('List_rows_present_in_a_table_tblAlert1FDPChange')?['body/value']),',"alert2":',string(outputs('List_rows_present_in_a_table_tblAlert2AccuracyBias')?['body/value']),',"alert3":',string(outputs('List_rows_present_in_a_table_tblAlert3ForecastVsSales')?['body/value']),',"alert4":',string(outputs('List_rows_present_in_a_table_tblAlert4StatVsFDP')?['body/value']),'}}'))
+```
+
+Note the closing `'}}'` — two braces, one for `alerts` and one for the outer
+object. A single brace produces malformed JSON.
 
 `week_of` is snapped back to the Monday of that week, so any date works.
 
