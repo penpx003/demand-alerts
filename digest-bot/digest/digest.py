@@ -360,6 +360,42 @@ def to_teams_html(text: str) -> str:
     return "".join(out)
 
 
+WORKBOOK_LINK_TEXT = "Open the alert workbook"
+
+
+def safe_link(url: str) -> str:
+    """Only http(s) links are allowed through.
+
+    The URL ends up as an anchor in a Teams message, so anything else — most
+    obviously a javascript: URL — must not be rendered. Returns "" if unsafe.
+    """
+    candidate = (url or "").strip()
+    lowered = candidate.lower()
+    if lowered.startswith("https://") or lowered.startswith("http://"):
+        return candidate
+    if candidate:
+        print(f"workbook link ignored, not an http(s) URL: {candidate[:60]}")
+    return ""
+
+
+def append_workbook_link(narrative: str, html_body: str, url: str) -> tuple[str, str]:
+    """Append the workbook link to both renderings.
+
+    The HTML anchor is added AFTER to_teams_html has run — passing it through
+    that function would escape the markup into visible tags.
+    """
+    link = safe_link(url)
+    if not link:
+        return narrative, html_body
+
+    markdown = f"{narrative}\n\n[{WORKBOOK_LINK_TEXT}]({link})"
+    anchor = (
+        f'<p><a href="{html.escape(link, quote=True)}">'
+        f"\U0001F4CA {WORKBOOK_LINK_TEXT}</a></p>"
+    )
+    return markdown, html_body + anchor
+
+
 def generate_narrative(cfg: Config, brief: str) -> tuple[str, str]:
     """Returns (narrative, model_name)."""
     # No reply deadline here — this runs on a weekly schedule, so a full-quality
@@ -405,6 +441,14 @@ def run_digest(payload: dict[str, Any], cfg: Config | None = None) -> dict[str, 
     else:
         narrative, model = generate_narrative(cfg, brief)
 
+    # A link in the request wins over the configured default, so the flow can
+    # pass the workbook's own URL if it has it to hand. Applied BEFORE the digest
+    # is persisted, so /latest returns exactly what was posted to Teams.
+    workbook_url = str(payload.get("workbook_url") or cfg.workbook_url or "")
+    narrative, narrative_html = append_workbook_link(
+        narrative, to_teams_html(narrative), workbook_url
+    )
+
     stats_json = {
         key: {
             "total_rows": s.total_rows,
@@ -429,7 +473,8 @@ def run_digest(payload: dict[str, Any], cfg: Config | None = None) -> dict[str, 
         "narrative": narrative,
         # Use this one in the Teams action: it renders as formatted text rather
         # than showing literal ** around every heading.
-        "narrative_html": to_teams_html(narrative),
+        "narrative_html": narrative_html,
+        "workbook_url": safe_link(workbook_url),
         "model": model,
         "total_alert_rows": total_rows,
         "snapshot_rows_stored": snapshot_rows,

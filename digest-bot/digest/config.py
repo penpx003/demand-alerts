@@ -29,6 +29,11 @@ class Config:
     supabase_url: str
     supabase_key: str
 
+    # --- presentation -----------------------------------------------------
+    # Link to the alert workbook, appended to the digest so a planner can open
+    # the detail behind the narrative. Blank omits the link entirely.
+    workbook_url: str
+
     # The digest tuning knobs (DEMAND_TREND_WEEKS, DEMAND_SNAPSHOT_PC_LIMIT,
     # DEMAND_TOP_N) are read as module constants in digest.py, where they are
     # used. Duplicating them here would give two sources of truth.
@@ -40,6 +45,7 @@ class Config:
             groq_model=os.getenv("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile"),
             supabase_url=_clean(os.getenv("SUPABASE_URL")),
             supabase_key=_clean(os.getenv("SUPABASE_KEY")),
+            workbook_url=_clean(os.getenv("WORKBOOK_URL")),
         )
 
     def require_groq(self) -> None:

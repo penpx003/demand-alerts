@@ -375,6 +375,14 @@ The repo holds both halves, so point Render at the `digest-bot` subfolder.
    | `DEMAND_TREND_WEEKS` | `8` |
    | `DEMAND_SNAPSHOT_PC_LIMIT` | `500` |
    | `DEMAND_TOP_N` | `8` |
+   | `WORKBOOK_URL` | link to the alert workbook (see below) |
+
+   **`WORKBOOK_URL`** adds an *"Open the alert workbook"* link to the bottom of
+   every digest, so a planner can click from the Teams post straight through to
+   the detail. Get it by opening the workbook in Excel on the web and copying the
+   address bar, or in SharePoint via the file's **Copy link**. Only `http(s)`
+   URLs are accepted; leave it blank to omit the link. The flow can override it
+   per run with a `workbook_url` field in the HTTP body.
 
 5. **Create Web Service** and wait for the build.
 

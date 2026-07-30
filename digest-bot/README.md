@@ -123,6 +123,7 @@ A week with no alerts at all skips the LLM entirely and returns a fixed message.
 | `DEMAND_SNAPSHOT_PC_LIMIT` | `500` | Product-Customer rows stored per alert per week |
 | `DEMAND_TOP_N` | `8` | Items per alert and level in the brief |
 | `GROQ_CHAT_MODEL` | `llama-3.3-70b-versatile` | Generation model |
+| `WORKBOOK_URL` | *(blank)* | Adds "Open the alert workbook" to the digest. http(s) only; blank omits it |
 
 Too noisy? Raise the thresholds in the **Office Script**, not here — the digest
 narrates whatever the alerts contain. Different tone or sections? Edit `PROMPT` in

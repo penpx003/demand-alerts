@@ -198,6 +198,27 @@ check("list is closed", rendered.endswith("</ul>"))
 check("ampersand in a product name is escaped", "A &amp; B" in rendered)
 check("paragraphs wrapped", "<p>Sales fell 21 percentage points.</p>" in rendered)
 
+print("\nworkbook link")
+from digest.digest import append_workbook_link, safe_link, to_teams_html  # noqa: E402
+
+url = "https://suntorygroup.sharepoint.com/sites/Team/Shared%20Documents/DBAlerts.xlsx"
+md, htm = append_workbook_link("**Headline**\nBody.", to_teams_html("**Headline**\nBody."), url)
+check("markdown gets a link", f"]({url})" in md)
+check("html gets a real anchor, not escaped markup", f'<a href="{url}">' in htm)
+check("anchor is appended after the narrative", htm.index("<a href") > htm.index("Body."))
+
+md2, htm2 = append_workbook_link("Body.", "<p>Body.</p>", "")
+check("no link configured leaves both untouched", md2 == "Body." and htm2 == "<p>Body.</p>")
+
+check("javascript: URL rejected", safe_link("javascript:alert(1)") == "")
+check("file: URL rejected", safe_link("file:///C:/secret.xlsx") == "")
+check("http allowed", safe_link("http://example.com/a.xlsx") == "http://example.com/a.xlsx")
+_, htm3 = append_workbook_link("x", "<p>x</p>", "javascript:alert(1)")
+check("rejected URL produces no anchor", "<a href" not in htm3)
+
+_, htm4 = append_workbook_link("x", "<p>x</p>", 'https://e.com/a.xlsx?a=1&b="2"')
+check("URL is attribute-escaped", "&amp;" in htm4 and '&quot;' in htm4)
+
 print("\nendpoint")
 os.environ["DEMAND_DIGEST_TOKEN"] = "self-test-token"
 try:

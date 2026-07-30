@@ -22,6 +22,10 @@ services:
         value: "500"
       - key: DEMAND_TOP_N
         value: "8"
+      # Link appended to the digest so planners can open the detail. Not secret,
+      # but set it in the dashboard if you would rather not commit the site path.
+      - key: WORKBOOK_URL
+        sync: false
       # Secrets — set these in the Render dashboard (sync: false = not in repo):
       - key: GROQ_API_KEY
         sync: false
