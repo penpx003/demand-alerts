@@ -64,10 +64,25 @@ RAG project.
 
 ## Status
 
-- Office Script: **runs clean against the real workbook.** Still to confirm: that
-  the runtime dimension mapping picked the right columns (check the seven
-  `Dimension ... ->` lines in the run log), and the volume thresholds are still
-  placeholders — see [SETUP.md](SETUP.md) phases 1.2 and 1.5.
-- Digest bot: parsing, statistics, endpoint auth and a real Groq generation all
-  verified locally. **Not yet deployed**; the Supabase migration has not been run
-  and the Power Automate flow has not been built.
+**Live and running end to end** as of 2026-07-30.
+
+| Piece | State |
+|---|---|
+| Office Script | v1.3, runs clean against the real workbook |
+| Supabase | migration applied; snapshots and digests persisting |
+| Digest bot | deployed on Render; 52 self-checks passing |
+| Power Automate | `Weekly Demand Digest` runs Mondays, posts to Teams |
+
+Two things to keep an eye on:
+
+- **Volume thresholds** (`ALERT1_MIN_ABS_DIFF`, `ALERT3_MIN_HISTORICAL_VOLUME`,
+  `ALERT3_MIN_FUTURE_VOLUME`) started as placeholder `100`s. Confirm they match your
+  volume unit, or the alerts are either noisy or silent — [SETUP.md](SETUP.md) 1.5.
+- **The dimension mapping** is resolved at runtime from the header row. It has run
+  successfully, but "resolved" is not "resolved correctly" — check the seven
+  `Dimension ... ->` lines against the real columns at least once, and after any
+  change to the IBP extract layout. [SETUP.md](SETUP.md) 1.2.
+
+Rebuilding from scratch, or picking this up cold? [SETUP.md](SETUP.md) has the full
+build, the traps that cost time the first time round, and a condensed checklist at
+the end.
