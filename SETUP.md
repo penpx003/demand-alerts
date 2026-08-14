@@ -48,6 +48,7 @@ read this table first — it is the whole hard-won lesson of the project in one 
 | Teams message **typed** rather than entered as an expression | Channel receives the literal `body('HTTP')?['narrative_html']` | 6.6 |
 | PowerShell `echo x >> file` writes **UTF-16** | git commits README.md as a binary blob | 4 |
 | `git remote add` when origin exists | Fails, silently leaves the **wrong** URL; push dies with bare `error: 400` | 4 |
+| Country flow not sending `country` | Countries **overwrite each other's** digest; trends mix countries | 8 |
 
 ---
 
@@ -235,6 +236,15 @@ the accuracy against IBP for that week. Everything downstream trusts these numbe
 2. Paste all of
    [digest-bot/sql/001_demand_alerts.sql](digest-bot/sql/001_demand_alerts.sql).
 3. **Run**.
+4. Repeat with
+   [digest-bot/sql/002_country.sql](digest-bot/sql/002_country.sql), which adds
+   the per-country scope. Required even for a single country — the service writes
+   a `country` column on every row.
+
+> Migrations run in order and are safe to re-run. If you deploy the service
+> without 002, digests still generate and post, but nothing is persisted and no
+> trend history accumulates — the log shows
+> `column demand_digests.country does not exist`.
 
 ### 2.2 Verify
 
@@ -564,12 +574,16 @@ Add an **HTTP** action.
   the mapping reads left to right and is hard to get wrong:
 
   ```text
-  json(concat('{"week_of":"',formatDateTime(utcNow(),'yyyy-MM-dd'),'","alerts":{"alert1":',string(outputs('List_rows_present_in_a_table_tblAlert1FDPChange')?['body/value']),',"alert2":',string(outputs('List_rows_present_in_a_table_tblAlert2AccuracyBias')?['body/value']),',"alert3":',string(outputs('List_rows_present_in_a_table_tblAlert3ForecastVsSales')?['body/value']),',"alert4":',string(outputs('List_rows_present_in_a_table_tblAlert4StatVsFDP')?['body/value']),'}}'))
+  json(concat('{"week_of":"',formatDateTime(utcNow(),'yyyy-MM-dd'),'","country":"ES","workbook_url":"https://YOUR-SITE/sites/Team/Ai%20Agents/DB_Alert.xlsx","alerts":{"alert1":',string(outputs('List_rows_present_in_a_table_tblAlert1FDPChange')?['body/value']),',"alert2":',string(outputs('List_rows_present_in_a_table_tblAlert2AccuracyBias')?['body/value']),',"alert3":',string(outputs('List_rows_present_in_a_table_tblAlert3ForecastVsSales')?['body/value']),',"alert4":',string(outputs('List_rows_present_in_a_table_tblAlert4StatVsFDP')?['body/value']),'}}'))
   ```
 
   Action references use underscores for spaces. Note the closing `'}}'` — two
   braces, one for `alerts` and one for the outer object. A single brace produces
   malformed JSON.
+
+  `country` and `workbook_url` are what make one flow per country work — see
+  [Phase 8](#phase-8--running-several-countries). For a single country, drop both
+  and the service falls back to `WORKBOOK_URL` on Render.
 
 > ⚠️ **`alertN` must reference the action reading `tblAlertN…`.** All four tables
 > share Market / Product / Customer, so a crossed wire yields a digest that looks
@@ -663,6 +677,89 @@ weeks"*. If week two still reports nothing recurring, check
 
 ---
 
+## Phase 8 — Running several countries
+
+One flow per country, one Teams channel per country, one workbook per country —
+but **one** Render service and **one** Supabase project shared by all of them.
+Nothing needs duplicating on the hosting side.
+
+```text
+ES:  channel AI_Alert (ES)  ->  DB_Alert.xlsx (ES)  ->  flow "Weekly Demand Digest ES"  \
+PT:  channel AI_Alert (PT)  ->  DB_Alert.xlsx (PT)  ->  flow "... PT"                    >-- one service
+IT:  channel AI_Alert (IT)  ->  DB_Alert.xlsx (IT)  ->  flow "... IT"                   /
+```
+
+### What makes it safe
+
+Each POST carries a `country`. It scopes both stored tables and every trend
+lookup.
+
+> ⚠️ **Without `country`, countries overwrite each other.** A digest is keyed on
+> `(country, week_of)`. Keyed on `week_of` alone — the original design — the last
+> country to run each week would replace every other country's digest for that
+> week, and "alerted in 3 of the last 8 weeks" would silently count other
+> countries' weeks as if they were the same book of business. Migration 002 is
+> what fixes this; apply it before adding the second country.
+
+The label is normalised — upper-cased, trimmed, punctuation stripped — so `es`,
+`Es` and `ES` are one scope. Keep it consistent anyway: `ES` and `ESP` are two
+different scopes, and each would build its own separate history.
+
+### Adding a country
+
+Copy an existing flow, then change exactly five things:
+
+| # | Where | Change |
+|---|---|---|
+| 1 | `Run script` | the country's own workbook |
+| 2 | 4 × `List rows` | the same workbook (table names are identical everywhere) |
+| 3 | HTTP body | `"country":"PT"` |
+| 4 | HTTP body | `"workbook_url":"…the PT workbook…"` |
+| 5 | Teams step | the country's own channel |
+
+Everything else — URI, token, table names, the Delay, pagination — is identical
+across countries.
+
+The Office Script itself needs no per-country change: it is installed once per
+workbook and reads whatever `DBAlerts` worksheet it finds there. Thresholds are
+per-workbook, so a country with different volumes can be tuned independently.
+
+### Verify after adding one
+
+```sql
+select country, week_of, count(*) rows, max(created_at) last_write
+from demand_alert_snapshots
+group by country, week_of
+order by week_of desc, country;
+```
+
+Each country must appear as its **own row**. If a country is missing, its flow is
+not sending `country`; if two countries share a row, they are sending the same
+label.
+
+Then confirm each digest survived:
+
+```sql
+select country, week_of, model, left(narrative, 60) from demand_digests
+order by week_of desc, country;
+```
+
+One row per country per week. Fewer rows than countries means the overwrite bug —
+migration 002 has not been applied.
+
+Per-country retrieval:
+
+```powershell
+Invoke-RestMethod -Uri "https://demand-alerts.onrender.com/api/demand-digest/latest?country=PT" `
+  -Headers @{ "X-Digest-Token" = $t }
+```
+
+> ⚠️ **The first week of a new country reports no recurring items**, correctly —
+> it has no history of its own. It does *not* inherit the trend history of
+> countries already running.
+
+---
+
 ## Operating it
 
 ### Weekly
@@ -696,6 +793,10 @@ guarantees. The spot-check in Phase 7 is what catches a drifting model.
 | Literal `**` in the Teams message | Step 9 uses `narrative` instead of `narrative_html`. |
 | Literal `body('HTTP')?['narrative_html']` in Teams | Typed as text, not entered as an expression. See 6.6. |
 | Nothing ever reported as recurring | Migration not applied, or publishable Supabase key. Check the Render log for `snapshot/trend step failed`. |
+| `column demand_digests.country does not exist` | Migration `002_country.sql` not applied. Digests still post but nothing persists. |
+| Only one country's digest per week survives | A flow is not sending `country`, or 002 not applied. See Phase 8. |
+| A country's Teams post links to another country's workbook | That flow's `workbook_url` was not changed when the flow was copied. |
+| A new country claims items are "recurring" in week 1 | Two flows are sending the **same** `country` label. |
 | Digest describes last week's data | Flow ran before the IBP extract refreshed. |
 | Worksheet exists with no table | A write failed mid-publish. Re-run; lower `WRITE_CHUNK_CELLS`. See 1.4. |
 | Flow times out | Render cold start; raise the HTTP action's timeout. |
@@ -725,7 +826,8 @@ Condensed, for when you already know the build.
 [ ]    Read the 7 Dimension lines; confirm "All four output tables verified present."
 [ ]    Set ALERT1_MIN_ABS_DIFF / ALERT3_MIN_* to real materiality
 [ ]    Paste ListTables.ts, run, confirm 4/4 FOUND
-[ ] 2  Run sql/001_demand_alerts.sql; verify 2 tables + the RPC; copy URL + SECRET key
+[ ] 2  Run sql/001_demand_alerts.sql then sql/002_country.sql; verify 2 tables + RPC
+[ ]    Copy the project URL + the SECRET key
 [ ] 3  venv, .env, tests\test_digest.py -> "all checks passed"
 [ ] 4  git init/commit; empty GitHub repo; remote set-url; verify remote -v; push
 [ ] 5  Render Web Service, Root Directory = digest-bot, 9 env vars, Live, /health ok
@@ -738,4 +840,12 @@ Condensed, for when you already know the build.
 [ ]    Teams message via the fx Expression tab, narrative_html
 [ ] 7  Verify: not 256 rows, snapshots stored, 3 figures traced to the worksheets
 [ ]    SQL check: metric/volume not null
+
+Per extra country (Phase 8) — copy the flow, change five things:
+[ ]    Run script      -> that country's workbook
+[ ]    4x List rows    -> the same workbook (table names never change)
+[ ]    HTTP body       -> "country":"XX"
+[ ]    HTTP body       -> "workbook_url":"...that country's file..."
+[ ]    Teams step      -> that country's channel
+[ ]    Verify: one snapshot row group and one digest row PER COUNTRY per week
 ```

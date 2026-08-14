@@ -49,6 +49,21 @@ SNAPSHOT_PC_LIMIT = int(os.getenv("DEMAND_SNAPSHOT_PC_LIMIT", "500"))
 TOP_N = int(os.getenv("DEMAND_TOP_N", "8"))
 
 
+_COUNTRY_RE = re.compile(r"[^A-Z0-9 _-]+")
+
+
+def normalise_country(value: Any) -> str:
+    """Country label supplied by the flow, e.g. 'ES', 'Portugal'.
+
+    Upper-cased and stripped of punctuation so that 'es', 'ES ' and 'Es' are the
+    same scope — a country that drifts between spellings would fragment its own
+    trend history into separate buckets. Blank means the single-country default,
+    which keeps a one-country installation working unchanged.
+    """
+    text = str(value or "").strip().upper()
+    return _COUNTRY_RE.sub("", text)[:32].strip()
+
+
 def monday_of(day: dt.date) -> dt.date:
     return day - dt.timedelta(days=day.weekday())
 
@@ -73,7 +88,9 @@ class DemandStore:
         self.cfg = cfg
         self.client: Client = create_client(cfg.supabase_url, cfg.supabase_key)
 
-    def save_snapshot(self, week_of: dt.date, parsed: dict[str, list[AlertRow]]) -> int:
+    def save_snapshot(
+        self, week_of: dt.date, parsed: dict[str, list[AlertRow]], country: str = ""
+    ) -> int:
         """Upsert this week's rows. Idempotent: a retried flow overwrites."""
         payload: list[dict[str, Any]] = []
 
@@ -90,6 +107,7 @@ class DemandStore:
             for row in product_rows + pc_rows[:SNAPSHOT_PC_LIMIT]:
                 payload.append(
                     {
+                        "country": country,
                         "week_of": week_of.isoformat(),
                         "alert": row.alert,
                         "agg_level": row.agg_level,
@@ -104,7 +122,7 @@ class DemandStore:
                     }
                 )
 
-        conflict = "week_of,alert,agg_level,market,product,customer,bucket"
+        conflict = "country,week_of,alert,agg_level,market,product,customer,bucket"
         for start in range(0, len(payload), 500):
             self.client.table("demand_alert_snapshots").upsert(
                 payload[start : start + 500], on_conflict=conflict
@@ -112,13 +130,22 @@ class DemandStore:
         return len(payload)
 
     def recurrence(
-        self, alert: str, level: str, since: dt.date
+        self, alert: str, level: str, since: dt.date, country: str = ""
     ) -> dict[tuple[str, str, str], dict[str, Any]]:
-        """{(market, product, customer): {weeks_seen, first_seen, last_seen}}."""
+        """{(market, product, customer): {weeks_seen, first_seen, last_seen}}.
+
+        Scoped to one country: without it, "alerted in 3 of the last 8 weeks"
+        would silently count weeks belonging to other countries.
+        """
         try:
             resp = self.client.rpc(
                 "demand_alert_recurrence",
-                {"p_alert": alert, "p_level": level, "p_since": since.isoformat()},
+                {
+                    "p_alert": alert,
+                    "p_level": level,
+                    "p_since": since.isoformat(),
+                    "p_country": country,
+                },
             ).execute()
         except Exception as e:  # a missing migration must not kill the digest
             print(f"recurrence lookup skipped for {alert}/{level}: {e}")
@@ -130,22 +157,31 @@ class DemandStore:
         }
 
     def save_digest(
-        self, week_of: dt.date, narrative: str, stats: dict[str, Any], model: str
+        self,
+        week_of: dt.date,
+        narrative: str,
+        stats: dict[str, Any],
+        model: str,
+        country: str = "",
     ) -> None:
         self.client.table("demand_digests").upsert(
             {
+                "country": country,
                 "week_of": week_of.isoformat(),
                 "narrative": narrative,
                 "stats": stats,
                 "model": model,
             },
-            on_conflict="week_of",
+            # (country, week_of) — on week_of alone, the last country to run
+            # each week would overwrite every other country's digest.
+            on_conflict="country,week_of",
         ).execute()
 
-    def previous_digest_week(self, before: dt.date) -> str | None:
+    def previous_digest_week(self, before: dt.date, country: str = "") -> str | None:
         resp = (
             self.client.table("demand_digests")
             .select("week_of")
+            .eq("country", country)
             .lt("week_of", before.isoformat())
             .order("week_of", desc=True)
             .limit(1)
@@ -154,14 +190,12 @@ class DemandStore:
         data = resp.data or []
         return data[0]["week_of"] if data else None
 
-    def latest_digest(self) -> dict[str, Any] | None:
-        resp = (
-            self.client.table("demand_digests")
-            .select("*")
-            .order("week_of", desc=True)
-            .limit(1)
-            .execute()
-        )
+    def latest_digest(self, country: str | None = None) -> dict[str, Any] | None:
+        """Most recent digest. Without a country, the most recent of any."""
+        query = self.client.table("demand_digests").select("*")
+        if country is not None:
+            query = query.eq("country", country)
+        resp = query.order("week_of", desc=True).limit(1).execute()
         data = resp.data or []
         return data[0] if data else None
 
@@ -192,10 +226,17 @@ def build_brief(
     previous_week: str | None,
     stats_by_alert: dict[str, AlertStats],
     recurrence_by_alert: dict[str, dict[tuple[str, str, str], dict[str, Any]]],
+    country: str = "",
 ) -> str:
     """Compact factual brief. This is the ONLY source of numbers for the LLM."""
     lines: list[str] = [
         f"WEEK OF {week_of.isoformat()} (Monday).",
+        (
+            f"Country / scope: {country}. Every figure below is for {country} only —"
+            " say so in the headline."
+            if country
+            else "Country / scope: not specified (single scope)."
+        ),
         f"Previous digest: {previous_week or 'none — this is the first one'}.",
         "",
         "Notes for interpretation:",
@@ -311,9 +352,10 @@ BRIEF:
 """
 
 
-def _empty_narrative(week_of: dt.date) -> str:
+def _empty_narrative(week_of: dt.date, country: str = "") -> str:
+    scope = f" in {country}" if country else ""
     return (
-        f"**Headline** - No demand planning alerts were raised for the week of "
+        f"**Headline** - No demand planning alerts were raised{scope} for the week of "
         f"{week_of.isoformat()}. Every combination stayed within the configured "
         f"thresholds for forecast change, accuracy and bias, forecast versus recent "
         f"sales, and statistical forecast value added.\n\n"
@@ -409,6 +451,7 @@ def run_digest(payload: dict[str, Any], cfg: Config | None = None) -> dict[str, 
     """Full pipeline for one weekly POST. Returns the narrative and its stats."""
     cfg = cfg or Config.load()
     week_of = parse_week_of(payload.get("week_of"))
+    country = normalise_country(payload.get("country"))
     parsed = parse_payload(payload)
 
     stats_by_alert = {key: summarise(key, rows, TOP_N) for key, rows in parsed.items()}
@@ -421,23 +464,27 @@ def run_digest(payload: dict[str, Any], cfg: Config | None = None) -> dict[str, 
 
     try:
         store = DemandStore(cfg)
-        previous_week = store.previous_digest_week(week_of)
+        previous_week = store.previous_digest_week(week_of, country)
         since = week_of - dt.timedelta(weeks=TREND_WEEKS)
         # Recurrence is read BEFORE this week's snapshot is written, so "seen in
         # N previous weeks" never counts the run that is happening right now.
         for key in ALERT_SPECS:
-            recurrence_by_alert[key] = store.recurrence(key, LEVEL_PRODUCT, since)
-            recurrence_by_alert[f"{key}:pc"] = store.recurrence(
-                key, LEVEL_PRODUCT_CUSTOMER, since
+            recurrence_by_alert[key] = store.recurrence(
+                key, LEVEL_PRODUCT, since, country
             )
-        snapshot_rows = store.save_snapshot(week_of, parsed)
+            recurrence_by_alert[f"{key}:pc"] = store.recurrence(
+                key, LEVEL_PRODUCT_CUSTOMER, since, country
+            )
+        snapshot_rows = store.save_snapshot(week_of, parsed, country)
     except Exception as e:  # storage problems must not lose the digest
         print(f"snapshot/trend step failed, continuing without history: {e}")
 
-    brief = build_brief(week_of, previous_week, stats_by_alert, recurrence_by_alert)
+    brief = build_brief(
+        week_of, previous_week, stats_by_alert, recurrence_by_alert, country
+    )
 
     if total_rows == 0:
-        narrative, model = _empty_narrative(week_of), "none"
+        narrative, model = _empty_narrative(week_of, country), "none"
     else:
         narrative, model = generate_narrative(cfg, brief)
 
@@ -463,12 +510,13 @@ def run_digest(payload: dict[str, Any], cfg: Config | None = None) -> dict[str, 
 
     if store is not None:
         try:
-            store.save_digest(week_of, narrative, stats_json, model)
+            store.save_digest(week_of, narrative, stats_json, model, country)
         except Exception as e:
             print(f"digest not persisted: {e}")
 
     return {
         "week_of": week_of.isoformat(),
+        "country": country,
         "previous_week": previous_week,
         "narrative": narrative,
         # Use this one in the Teams action: it renders as formatted text rather

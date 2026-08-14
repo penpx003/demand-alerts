@@ -198,6 +198,30 @@ check("list is closed", rendered.endswith("</ul>"))
 check("ampersand in a product name is escaped", "A &amp; B" in rendered)
 check("paragraphs wrapped", "<p>Sales fell 21 percentage points.</p>" in rendered)
 
+print("\ncountry scoping")
+from digest.digest import normalise_country, build_brief, _empty_narrative  # noqa: E402
+
+check("country is upper-cased", normalise_country("es") == "ES")
+check("whitespace stripped", normalise_country("  PT  ") == "PT")
+# A country drifting between spellings would fragment its own trend history.
+check("same scope regardless of case/space", normalise_country("Es") == normalise_country("eS "))
+check("punctuation removed", normalise_country("ES!*") == "ES")
+check("missing country is the single-scope default", normalise_country(None) == "")
+check("length bounded", len(normalise_country("X" * 100)) == 32)
+
+from digest.alerts import ALERT_SPECS, summarise  # noqa: E402
+
+no_rows = {key: summarise(key, [], 8) for key in ALERT_SPECS}
+brief_es = build_brief(dt.date(2026, 7, 27), None, no_rows, {}, "ES")
+check("brief states the country", "Country / scope: ES" in brief_es)
+check("brief tells the model to say so", "ES only" in brief_es)
+brief_none = build_brief(dt.date(2026, 7, 27), None, no_rows, {}, "")
+check("no country -> single scope wording", "not specified" in brief_none)
+
+check("empty narrative names the country", "in ES" in _empty_narrative(dt.date(2026, 7, 27), "ES"))
+check("empty narrative without country reads naturally",
+      "raised for the week" in _empty_narrative(dt.date(2026, 7, 27), ""))
+
 print("\nworkbook link")
 from digest.digest import append_workbook_link, safe_link, to_teams_html  # noqa: E402
 

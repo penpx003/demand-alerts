@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 # Importing the package injects truststore before any HTTPS client is built.
 from digest.config import Config
-from digest.digest import DemandStore, run_digest
+from digest.digest import DemandStore, normalise_country, run_digest
 
 app = FastAPI(title="Demand Planning digest")
 
@@ -43,10 +43,16 @@ def _authorised(request: Request) -> bool:
 async def demand_digest(request: Request):
     """Weekly Demand Planning digest.
 
-    Body: {"week_of": "2026-07-27", "alerts": {"alert1": [...], ..., "alert4": [...]}}
+    Body: {"week_of": "2026-07-27", "country": "ES", "workbook_url": "https://...",
+           "alerts": {"alert1": [...], ..., "alert4": [...]}}
     where each list holds the rows of the matching output table from the
     `Demand Alerts` Office Script, as returned by Power Automate's
     "List rows present in a table".
+
+    `country` scopes storage and trend history, so one flow per country can share
+    this service without overwriting each other. `workbook_url` overrides the
+    configured default, so each country's digest links to its own workbook. Both
+    are optional; omitted, the service behaves as a single-scope installation.
     """
     if not _authorised(request):
         return JSONResponse({"error": "Unauthorized."}, status_code=401)
@@ -71,12 +77,18 @@ async def demand_digest(request: Request):
 
 
 @app.get("/api/demand-digest/latest")
-def demand_digest_latest(request: Request):
-    """The most recent stored digest, for re-posting or a quick check."""
+def demand_digest_latest(request: Request, country: str | None = None):
+    """The most recent stored digest, for re-posting or a quick check.
+
+    ?country=ES scopes it to one country. Omitted, it returns the most recent
+    digest of any country — which with several country flows running is whichever
+    happened to finish last, so pass the country when you mean a specific one.
+    """
     if not _authorised(request):
         return JSONResponse({"error": "Unauthorized."}, status_code=401)
 
-    latest = DemandStore(Config.load()).latest_digest()
+    scope = normalise_country(country) if country is not None else None
+    latest = DemandStore(Config.load()).latest_digest(scope)
     if not latest:
-        return {"week_of": None, "narrative": None}
+        return {"week_of": None, "country": scope, "narrative": None}
     return latest

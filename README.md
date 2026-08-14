@@ -83,6 +83,12 @@ Two things to keep an eye on:
   `Dimension ... ->` lines against the real columns at least once, and after any
   change to the IBP extract layout. [SETUP.md](SETUP.md) 1.2.
 
+**Multi-country.** One flow, Teams channel and workbook per country; one shared
+Render service and Supabase project. Each POST carries a `country` that scopes
+storage and trend history, plus a `workbook_url` so each digest links to its own
+file. See [SETUP.md](SETUP.md) Phase 8 — and apply `sql/002_country.sql` before
+adding the second country, or they overwrite each other's digest.
+
 Rebuilding from scratch, or picking this up cold? [SETUP.md](SETUP.md) has the full
 build, the traps that cost time the first time round, and a condensed checklist at
 the end.
