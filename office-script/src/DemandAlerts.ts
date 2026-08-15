@@ -2,7 +2,7 @@
  * ============================================================================
  * DEMAND PLANNING ALERTS  —  Microsoft Office Script (Excel Automate)
  * ============================================================================
- * Version  : 1.3
+ * Version  : 1.4
  * Runs on  : Excel for the web / desktop, Automate tab, "New Script"
  * Workbook : DemandAlertsScripts
  * Source   : worksheet "DBAlerts" (IBP CSV extract)
@@ -377,6 +377,16 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
     let rowsWithInvalidCells: number = 0;
     let rowsOutsideHorizon: number = 0;
 
+    // Totals per Key Figure over the rows actually analysed. A Key Figure that
+    // is empty in the extract makes whole alerts silently impossible — Accuracy
+    // and Bias need actuals, so a blank Sales History excludes every entity and
+    // the run reports "no alerts" with nothing to indicate why.
+    let totSales: number = 0;
+    let totFdpCur: number = 0;
+    let totFdpPrev: number = 0;
+    let totFdpSnap: number = 0;
+    let totStatSnap: number = 0;
+
     const minOffset: number = -HISTORICAL_WEEKS;
     const maxOffset: number = FUTURE_WEEKS;
 
@@ -435,6 +445,12 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
                 }
             }
 
+            totSales += sales;
+            totFdpCur += fdpCur;
+            totFdpPrev += fdpPrev;
+            totFdpSnap += fdpSnap;
+            totStatSnap += statSnap;
+
             const market: string = readText(row[dims.market]);
             const product: string = readText(row[dims.product]);
             const description: string = dims.productDesc >= 0 ? readText(row[dims.productDesc]) : "";
@@ -473,6 +489,36 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
         " | Product-Customer entities: " + productCustomerMap.size +
         " | Product entities: " + productMap.size
     );
+
+    console.log(
+        "Key Figure totals over analysed rows: " +
+        "Sales History=" + Math.round(totSales) +
+        " | Current FDP=" + Math.round(totFdpCur) +
+        " | FDP W-1=" + Math.round(totFdpPrev) +
+        " | FDP Snapshot=" + Math.round(totFdpSnap) +
+        " | Stat Snapshot=" + Math.round(totStatSnap)
+    );
+
+    const emptyKfs: string[] = [];
+    if (totSales === 0) { emptyKfs.push(KF_SALES_HISTORY); }
+    if (totFdpCur === 0) { emptyKfs.push(KF_FDP_CURRENT); }
+    if (totFdpPrev === 0) { emptyKfs.push(KF_FDP_PREVIOUS); }
+    if (totFdpSnap === 0) { emptyKfs.push(KF_FDP_SNAPSHOT); }
+    if (totStatSnap === 0) { emptyKfs.push(KF_STAT_SNAPSHOT); }
+    if (emptyKfs.length > 0) {
+        console.log(
+            "WARNING: these Key Figures are entirely zero/blank in the analysed rows: " +
+            emptyKfs.join(", ") + ".\n" +
+            "  Alerts depending on them CANNOT produce results:\n" +
+            "    Sales History  -> Alerts 2, 3 and 4 (no actuals, so no Accuracy or Bias)\n" +
+            "    FDP Snapshot   -> Alerts 2 and 4\n" +
+            "    Stat Snapshot  -> Alert 4\n" +
+            "    Current FDP    -> Alerts 1 and 3\n" +
+            "    FDP W-1        -> Alert 1\n" +
+            "  Check the extract really contains this Key Figure, and that its column\n" +
+            "  header matches the KF_* constant exactly."
+        );
+    }
 
     if (ENABLE_SOURCE_KPI_VALIDATION) {
         validateAgainstSourceKpis(productCustomerMap, counters);
@@ -699,6 +745,20 @@ function validateRequiredColumns(
         statError: findKeyFigureColumn(headerMap, KF_STAT_ERROR),
         statAccuracy: findKeyFigureColumn(headerMap, KF_STAT_ACCURACY)
     };
+
+    // Which column each Key Figure resolved to. Without this, a mis-mapped or
+    // empty Key Figure is invisible — the run simply reports no alerts.
+    console.log(
+        "Key Figures -> " +
+        "SalesHistory=" + kfColumn(map.salesHistory) +
+        " FDP=" + kfColumn(map.fdpCurrent) +
+        " FDP W-1=" + kfColumn(map.fdpPrevious) +
+        " FDP Snapshot=" + kfColumn(map.fdpSnapshot) +
+        " Stat Snapshot=" + kfColumn(map.statSnapshot) +
+        " | validation: FDPAcc=" + kfColumn(map.fdpAccuracy) +
+        " FDPBias=" + kfColumn(map.fdpBias) +
+        " StatAcc=" + kfColumn(map.statAccuracy)
+    );
 
     const absentOptional: string[] = [];
     for (let i: number = 0; i < OPTIONAL_KEY_FIGURES.length; i++) {
@@ -1012,6 +1072,11 @@ function formatDate(utcMs: number): string {
 
 function pad2(n: number): string {
     return n < 10 ? "0" + n : "" + n;
+}
+
+/** Column letter for a resolved Key Figure, or "(absent)". */
+function kfColumn(index: number): string {
+    return index < 0 ? "(absent)" : columnLetter(index);
 }
 
 function columnLetter(index: number): string {
