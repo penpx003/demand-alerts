@@ -750,9 +750,15 @@ Copy an existing flow, then change exactly five things:
 Everything else — URI, token, table names, the Delay, pagination — is identical
 across countries.
 
-The Office Script itself needs no per-country change: it is installed once per
-workbook and reads whatever `DBAlerts` worksheet it finds there. Thresholds are
-per-workbook, so a country with different volumes can be tuned independently.
+The Office Script needs no per-country change: each flow references the **same**
+script by id and runs it against whichever workbook that flow points at.
+
+> ⚠️ **Thresholds are therefore GLOBAL, not per country.** One script serves every
+> country, so editing `ALERT1_MIN_ABS_DIFF` changes all of them at once. A
+> materiality that suits IBERIA may swamp or silence a smaller market. If a country
+> needs its own thresholds, save a separate copy of the script and point that
+> country's `Run script` action at the copy — then remember there are two scripts
+> to maintain.
 
 ### Verify after adding one
 
