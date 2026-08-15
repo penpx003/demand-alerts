@@ -705,6 +705,35 @@ The label is normalised — upper-cased, trimmed, punctuation stripped — so `e
 `Es` and `ES` are one scope. Keep it consistent anyway: `ES` and `ESP` are two
 different scopes, and each would build its own separate history.
 
+### Country registry
+
+Keep this current — it is the only place the mapping is written down.
+
+The five countries in scope, plus the original prototype flow:
+
+| `country` | Teams channel | Document folder |
+|---|---|---|
+| `BENELUX` | `0_BENELUX DP Comm Channel` | `/Alerts-BENELUX` |
+| `FRANCE` | `0_FRANCE DP Comm Channel` | `/Alerts - FRANCE` |
+| `GB` | `0_GB DP Comm Channel` | `/Alerts - GB` |
+| `IBERIA` | `0_IBERIA DP Comm Channel` | `/Alerts - IBERIA` |
+| `IRELAND` | `0_IRELAND DP Comm Channel` | `/Alerts - IRELAND` |
+| *(blank — prototype)* | Ai Agents | `/Ai Agents` |
+
+> The original `Weekly Demand Digest` flow over `/Ai Agents/DBAlerts.xlsx` sends no
+> `country` and its data showed market `ES40` — i.e. the same business as `IBERIA`.
+> Leaving both running produces two digests of the same data in two channels, each
+> building its own trend history and each looking correct in isolation. Retire it,
+> or give it a distinct scope.
+>
+> Channel display names and document folder names drift apart — a renamed channel
+> keeps its original folder. The **folder** is what appears in the file path, so
+> always confirm the folder rather than assuming it matches the channel.
+>
+> Folder naming is also not consistent (`/Alerts-BENELUX` vs `/Alerts - FRANCE`),
+> so a workbook URL cannot be derived from another country's. Copy each one from
+> that workbook's address bar.
+
 ### Adding a country
 
 Copy an existing flow, then change exactly five things:
