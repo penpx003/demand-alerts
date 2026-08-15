@@ -713,7 +713,7 @@ The five countries in scope, plus the original prototype flow:
 
 | `country` | Teams channel | Document folder |
 |---|---|---|
-| `BENELUX` | `0_BENELUX DP Comm Channel` | `/Alerts-BENELUX` |
+| `BENELUX` | `0_BENELUX DP Comm Channel` | `/Alerts - BENELUX` |
 | `FRANCE` | `0_FRANCE DP Comm Channel` | `/Alerts - FRANCE` |
 | `GB` | `0_GB DP Comm Channel` | `/Alerts - GB` |
 | `IBERIA` | `0_IBERIA DP Comm Channel` | `/Alerts - IBERIA` |
@@ -730,9 +730,10 @@ The five countries in scope, plus the original prototype flow:
 > keeps its original folder. The **folder** is what appears in the file path, so
 > always confirm the folder rather than assuming it matches the channel.
 >
-> Folder naming is also not consistent (`/Alerts-BENELUX` vs `/Alerts - FRANCE`),
-> so a workbook URL cannot be derived from another country's. Copy each one from
-> that workbook's address bar.
+> Folders follow `/Alerts - <COUNTRY>`, with spaces around the hyphen, which
+> URL-encode as `Alerts%20-%20COUNTRY`. Even so, copy each workbook URL from that
+> file's address bar rather than editing another country's — the URL carries a
+> per-file id, not just the path.
 
 ### Adding a country
 
