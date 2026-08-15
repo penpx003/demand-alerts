@@ -2,7 +2,7 @@
  * ============================================================================
  * DEMAND PLANNING ALERTS  —  Microsoft Office Script (Excel Automate)
  * ============================================================================
- * Version  : 1.4
+ * Version  : 1.5
  * Runs on  : Excel for the web / desktop, Automate tab, "New Script"
  * Workbook : DemandAlertsScripts
  * Source   : worksheet "DBAlerts" (IBP CSV extract)
@@ -387,6 +387,14 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
     let totFdpSnap: number = 0;
     let totStatSnap: number = 0;
 
+    // Where the volumes actually sit, week by week. A Key Figure can be well
+    // populated in the extract yet contribute nothing because its values fall
+    // outside the analysed window — which looks identical to an empty column.
+    const salesByOffset: Map<number, number> = new Map<number, number>();
+    const fdpByOffset: Map<number, number> = new Map<number, number>();
+    let minOffsetSeen: number = 9999;
+    let maxOffsetSeen: number = -9999;
+
     const minOffset: number = -HISTORICAL_WEEKS;
     const maxOffset: number = FUTURE_WEEKS;
 
@@ -420,6 +428,12 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
             }
 
             const offset: number = calculateWeekOffset(week.mondayUtc, currentMonday);
+            if (offset < minOffsetSeen) {
+                minOffsetSeen = offset;
+            }
+            if (offset > maxOffsetSeen) {
+                maxOffsetSeen = offset;
+            }
             if (offset === 0 || offset < minOffset || offset > maxOffset) {
                 // Current week is excluded from every calculation, by specification.
                 rowsOutsideHorizon++;
@@ -444,6 +458,9 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
                     continue;
                 }
             }
+
+            salesByOffset.set(offset, (salesByOffset.get(offset) || 0) + sales);
+            fdpByOffset.set(offset, (fdpByOffset.get(offset) || 0) + fdpCur);
 
             totSales += sales;
             totFdpCur += fdpCur;
@@ -497,6 +514,26 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
         " | FDP W-1=" + Math.round(totFdpPrev) +
         " | FDP Snapshot=" + Math.round(totFdpSnap) +
         " | Stat Snapshot=" + Math.round(totStatSnap)
+    );
+
+    // Week-by-week placement. If the totals above are zero but the extract
+    // clearly holds values, they are in weeks this run does not analyse — and
+    // the offsets-present range says how far the extract reaches.
+    const perWeek: string[] = [];
+    for (let o: number = minOffset; o <= maxOffset; o++) {
+        if (o === 0) {
+            continue;
+        }
+        perWeek.push(
+            "W" + (o > 0 ? "+" : "") + o + " sales=" + Math.round(salesByOffset.get(o) || 0) +
+            " fdp=" + Math.round(fdpByOffset.get(o) || 0)
+        );
+    }
+    console.log("Volumes by analysed week: " + perWeek.join(" | "));
+    console.log(
+        "Week offsets present in the extract: " +
+        (minOffsetSeen === 9999 ? "none" : minOffsetSeen + " .. " + maxOffsetSeen) +
+        " (analysed: " + minOffset + " .. " + maxOffset + ", current week excluded)"
     );
 
     const emptyKfs: string[] = [];
