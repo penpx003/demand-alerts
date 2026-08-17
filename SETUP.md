@@ -832,6 +832,7 @@ guarantees. The spot-check in Phase 7 is what catches a drifting model.
 | `column demand_digests.country does not exist` | Migration `002_country.sql` not applied. Digests still post but nothing persists. |
 | Only one country's digest per week survives | A flow is not sending `country`, or 002 not applied. See Phase 8. |
 | A country's Teams post links to another country's workbook | That flow's `workbook_url` was not changed when the flow was copied. |
+| Flow green, `Run script` succeeded, but the workbook is **untouched** | The action's item id points at a different file. The `metadata` path is a cached label and can disagree with `parameters.file`. Confirm by deleting one alert worksheet and re-running: if it does not come back, the flow writes elsewhere. Find the real target by searching SharePoint for the file name and checking Modified. |
 | A new country claims items are "recurring" in week 1 | Two flows are sending the **same** `country` label. |
 | Digest describes last week's data | Flow ran before the IBP extract refreshed. |
 | Worksheet exists with no table | A write failed mid-publish. Re-run; lower `WRITE_CHUNK_CELLS`. See 1.4. |
