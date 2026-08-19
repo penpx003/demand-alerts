@@ -737,7 +737,27 @@ The five countries in scope, plus the original prototype flow:
 
 ### Adding a country
 
-Copy an existing flow, then change exactly five things:
+> ⚠️ **Build the flow from scratch. Do NOT copy an existing one.**
+> A copied flow keeps the original's internal file id. Re-picking the File in the
+> designer does not reliably replace it, and the symptom is brutal: `Run script`
+> reports **Succeeded**, returns a full execution summary, and never touches the
+> workbook you think it targets. The four `List rows` steps then read that
+> workbook's stale tables and the digest reports whatever was last left there.
+> Rebuilding from scratch fixed it; hours of re-picking did not.
+
+**Build `Run script` alone first, and prove it before adding anything else:**
+
+1. New scheduled flow → add **Run script** only → choose the file by navigating
+   Location → Document Library → `/Alerts - <COUNTRY>` → pick `Demand Alerts`.
+2. **Save**, then **Test**.
+3. Confirm the workbook's **Modified** timestamp moves, and that the note in an
+   empty alert sheet shows the current week's Monday.
+4. Only now add the Delay, the four `List rows`, the HTTP and the Teams steps.
+
+Ten minutes spent proving step 3 saves a day of debugging a flow whose every
+individual setting looks correct.
+
+Then the five things that differ per country:
 
 | # | Where | Change |
 |---|---|---|
