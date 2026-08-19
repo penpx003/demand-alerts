@@ -423,7 +423,7 @@ The repo holds both halves, so point Render at the `digest-bot` subfolder.
    | Key | Value |
    |---|---|
    | `GROQ_API_KEY` | your Groq key |
-   | `GROQ_CHAT_MODEL` | `llama-3.3-70b-versatile` |
+   | `GROQ_CHAT_MODEL` | `openai/gpt-oss-120b` (see note below) |
    | `SUPABASE_URL` | from 2.3 |
    | `SUPABASE_KEY` | the **secret** key from 2.3 |
    | `DEMAND_DIGEST_TOKEN` | the token from 3.2 |
@@ -838,6 +838,8 @@ guarantees. The spot-check in Phase 7 is what catches a drifting model.
 | Worksheet exists with no table | A write failed mid-publish. Re-run; lower `WRITE_CHUNK_CELLS`. See 1.4. |
 | Flow times out | Render cold start; raise the HTTP action's timeout. |
 | `Digest failed: GROQ_API_KEY is not set` | Env var missing on Render. |
+| `model_not_found` / `does not exist or you do not have access` | Groq retired the model id. List current ones with `GET https://api.groq.com/openai/v1/models` (Bearer your key) and update `GROQ_CHAT_MODEL`. The Llama 3.x line disappeared in Aug 2026. |
+| HTTP step runs for minutes without finishing | Render free-tier cold start (~30 s) plus snapshot writes on a large payload. Raise the HTTP action's timeout; watch the Render logs to confirm it is progressing rather than stuck. |
 
 ### Tuning
 

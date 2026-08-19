@@ -42,7 +42,12 @@ class Config:
     def load(cls) -> "Config":
         return cls(
             groq_api_key=_clean(os.getenv("GROQ_API_KEY")),
-            groq_model=os.getenv("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile"),
+            # Groq retires model ids without notice — the Llama 3.x line vanished
+            # in Aug 2026, giving `model_not_found` 404s on a previously working
+            # deployment. If that happens, list the current ids with:
+            #   GET https://api.groq.com/openai/v1/models  (Bearer GROQ_API_KEY)
+            # and set GROQ_CHAT_MODEL to one of them.
+            groq_model=os.getenv("GROQ_CHAT_MODEL", "openai/gpt-oss-120b"),
             supabase_url=_clean(os.getenv("SUPABASE_URL")),
             supabase_key=_clean(os.getenv("SUPABASE_KEY")),
             workbook_url=_clean(os.getenv("WORKBOOK_URL")),

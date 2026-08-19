@@ -14,8 +14,9 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
+      # Groq retires ids without notice; check /v1/models if this 404s.
       - key: GROQ_CHAT_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
       - key: DEMAND_TREND_WEEKS
         value: "8"
       - key: DEMAND_SNAPSHOT_PC_LIMIT
