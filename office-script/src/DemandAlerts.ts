@@ -2,7 +2,7 @@
  * ============================================================================
  * DEMAND PLANNING ALERTS  —  Microsoft Office Script (Excel Automate)
  * ============================================================================
- * Version  : 1.5
+ * Version  : 1.6
  * Runs on  : Excel for the web / desktop, Automate tab, "New Script"
  * Workbook : DemandAlertsScripts
  * Source   : worksheet "DBAlerts" (IBP CSV extract)
@@ -107,6 +107,27 @@ const HISTORICAL_WEEKS: number = 5;  // keep W-1 .. W-5
 const FUTURE_WEEKS: number = 12;     // keep W+1 .. W+12
 
 /* ---- Behaviour ---------------------------------------------------------- */
+
+/**
+ * Denominator for Accuracy. The two conventions give materially different
+ * numbers for the same data, so the choice matters:
+ *
+ *   "actual"   Accuracy = 1 - SUM(weekly |Forecast - Actual|) / SUM(Actual)
+ *              What the written specification asks for. Standard MAPE-style:
+ *              the error is measured against what actually happened, which
+ *              keeps it comparable across periods and entities.
+ *
+ *   "forecast" Accuracy = 1 - SUM(weekly |Forecast - Actual|) / SUM(Forecast)
+ *              What SAP IBP itself reports in the
+ *              "5 Final Demand Plan (Shipments) Accuracy" Key Figure — verified
+ *              against the BE30 / F19157 extract (Aug 2026), matching to three
+ *              decimals across several customers and weeks. Use this to make the
+ *              alerts agree with the figures planners already see in IBP.
+ *
+ * Bias is unaffected: it stays SUM(Forecast - Actual) / SUM(Actual) per spec.
+ */
+const ACCURACY_DENOMINATOR: string = "actual";   // "actual" | "forecast"
+
 /** Cap recalculated Accuracy into [0%, 100%] (IBP convention). */
 const CAP_ACCURACY_0_100: boolean = true;
 /** Skip the whole source row when a Key Figure cell cannot be parsed. */
@@ -1343,12 +1364,19 @@ function aggregateByEntityAndWeek(
     return totals;
 }
 
-/** Accuracy = 1 - SUM(weekly ABS error) / SUM(Actual). null when not calculable. */
-function calculatePeriodAccuracy(sumAbsError: number, sumActual: number): number | null {
-    if (sumActual === 0 || !isFinite(sumActual)) {
+/**
+ * Accuracy = 1 - SUM(weekly ABS error) / denominator, where the denominator is
+ * SUM(Actual) or SUM(Forecast) per ACCURACY_DENOMINATOR. null when the
+ * denominator is zero — dividing by it would be meaningless, not merely large.
+ */
+function calculatePeriodAccuracy(
+    sumAbsError: number, sumActual: number, sumForecast: number
+): number | null {
+    const base: number = ACCURACY_DENOMINATOR === "forecast" ? sumForecast : sumActual;
+    if (base === 0 || !isFinite(base)) {
         return null;
     }
-    let accuracy: number = 1 - sumAbsError / Math.abs(sumActual);
+    let accuracy: number = 1 - sumAbsError / Math.abs(base);
     if (CAP_ACCURACY_0_100) {
         if (accuracy < 0) {
             accuracy = 0;
@@ -1415,7 +1443,8 @@ function validateAgainstSourceKpis(productCustomerMap: Map<string, Entity>, coun
             counters.validationChecks++;
 
             const signed: number = bucket.fdpSnapshot - bucket.sales;
-            const recalcAccuracy: number | null = calculatePeriodAccuracy(Math.abs(signed), bucket.sales);
+            const recalcAccuracy: number | null =
+                calculatePeriodAccuracy(Math.abs(signed), bucket.sales, bucket.fdpSnapshot);
             const recalcBias: number | null = calculatePeriodBias(signed, bucket.sales);
 
             let mismatch: boolean = false;
@@ -1637,9 +1666,11 @@ function runAlert2(
             }
 
             const signedW1: number = w1.fdpSnapshot - w1.sales;
-            const accW1: number | null = calculatePeriodAccuracy(Math.abs(signedW1), w1.sales);
+            const accW1: number | null =
+                calculatePeriodAccuracy(Math.abs(signedW1), w1.sales, w1.fdpSnapshot);
             const biasW1: number | null = calculatePeriodBias(signedW1, w1.sales);
-            const accBase: number | null = calculatePeriodAccuracy(baseline.absError, baseline.actual);
+            const accBase: number | null =
+                calculatePeriodAccuracy(baseline.absError, baseline.actual, baseline.forecast);
             const biasBase: number | null = calculatePeriodBias(baseline.signedError, baseline.actual);
 
             if (accW1 === null || biasW1 === null || accBase === null || biasBase === null) {
@@ -1909,8 +1940,10 @@ function runAlert4(
                 return;
             }
 
-            const statAccuracy: number | null = calculatePeriodAccuracy(statTotals.absError, statTotals.actual);
-            const fdpAccuracy: number | null = calculatePeriodAccuracy(fdpTotals.absError, fdpTotals.actual);
+            const statAccuracy: number | null =
+                calculatePeriodAccuracy(statTotals.absError, statTotals.actual, statTotals.forecast);
+            const fdpAccuracy: number | null =
+                calculatePeriodAccuracy(fdpTotals.absError, fdpTotals.actual, fdpTotals.forecast);
             if (statAccuracy === null || fdpAccuracy === null) {
                 counters.excludedZeroActual++;
                 return;
