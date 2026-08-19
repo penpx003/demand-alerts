@@ -2,7 +2,7 @@
  * ============================================================================
  * DEMAND PLANNING ALERTS  —  Microsoft Office Script (Excel Automate)
  * ============================================================================
- * Version  : 1.6
+ * Version  : 1.7
  * Runs on  : Excel for the web / desktop, Automate tab, "New Script"
  * Workbook : DemandAlertsScripts
  * Source   : worksheet "DBAlerts" (IBP CSV extract)
@@ -91,6 +91,15 @@ const ALERT2_BIAS_DETERIORATION_THRESHOLD: number = 0.05;      // |bias| growth 
 const ALERT2_BIAS_MATERIALITY: number = 0.01;                  // dead-band for "No material change"
 /** Baseline weeks required (W-5..W-2). 4 = require all four; lower to relax. */
 const ALERT2_MIN_BASELINE_WEEKS: number = 4;
+/**
+ * Minimum W-1 actual volume for an Accuracy/Bias alert to be worth raising.
+ *
+ * Accuracy on a tiny base produces dramatic percentages from trivial absolute
+ * misses — a combination selling 158 units in a week can show 0% accuracy from
+ * an 88-unit error. Left at 0 every such combination alerts, which is what makes
+ * Alerts 2 and 4 far noisier than 1 and 3. Set it to real materiality.
+ */
+const ALERT2_MIN_ACTUAL: number = 0;
 
 /* ---- Alert 3: Forecast vs recent Sales ---------------------------------- */
 const ALERT3_PCT_THRESHOLD: number = 0.15;     // |Variation %| must exceed this
@@ -101,6 +110,8 @@ const ALERT3_MIN_FUTURE_VOLUME: number = 100;  // minimum forecast when there is
 const ALERT4_ACCURACY_DIFF_THRESHOLD: number = 0.05; // Stat acc - FDP acc above this (+5 pp)
 /** Completed weeks required in W-4..W-1. 4 = require all four. */
 const ALERT4_MIN_HISTORY_WEEKS: number = 4;
+/** Minimum Sales History over W-4..W-1. Same reasoning as ALERT2_MIN_ACTUAL. */
+const ALERT4_MIN_ACTUAL: number = 0;
 
 /* ---- Horizons ----------------------------------------------------------- */
 const HISTORICAL_WEEKS: number = 5;  // keep W-1 .. W-5
@@ -319,6 +330,7 @@ interface ExecutionSummary {
     alert4ProductCount: number;
     excludedInsufficientHistoricalWeeks: number;
     excludedZeroActual: number;
+    excludedBelowMinimumVolume: number;
     sourceKpiValidationChecks: number;
     sourceKpiValidationMismatches: number;
     outputWorksheets: string[];
@@ -328,6 +340,7 @@ interface ExecutionSummary {
 interface RunCounters {
     excludedInsufficientWeeks: number;
     excludedZeroActual: number;
+    excludedBelowMinimumVolume: number;
     validationChecks: number;
     validationMismatches: number;
 }
@@ -383,6 +396,7 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
     const counters: RunCounters = {
         excludedInsufficientWeeks: 0,
         excludedZeroActual: 0,
+        excludedBelowMinimumVolume: 0,
         validationChecks: 0,
         validationMismatches: 0
     };
@@ -621,6 +635,7 @@ function main(workbook: ExcelScript.Workbook): ExecutionSummary {
         alert4ProductCount: alert4.productCount,
         excludedInsufficientHistoricalWeeks: counters.excludedInsufficientWeeks,
         excludedZeroActual: counters.excludedZeroActual,
+        excludedBelowMinimumVolume: counters.excludedBelowMinimumVolume,
         sourceKpiValidationChecks: counters.validationChecks,
         sourceKpiValidationMismatches: counters.validationMismatches,
         outputWorksheets: outputSheets
@@ -1652,6 +1667,10 @@ function runAlert2(
                 counters.excludedZeroActual++;
                 return;
             }
+            if (w1.sales < ALERT2_MIN_ACTUAL) {
+                counters.excludedBelowMinimumVolume++;
+                return;
+            }
 
             const baseline: PeriodTotals = aggregateByEntityAndWeek(
                 entity, baselineOffsets, actualSales, forecastFdpSnapshot
@@ -1937,6 +1956,10 @@ function runAlert4(
             }
             if (statTotals.actual <= 0) {
                 counters.excludedZeroActual++;
+                return;
+            }
+            if (statTotals.actual < ALERT4_MIN_ACTUAL) {
+                counters.excludedBelowMinimumVolume++;
                 return;
             }
 
@@ -2237,6 +2260,8 @@ function returnExecutionSummary(summary: ExecutionSummary): void {
     console.log("Alert 4 Product-Customer / Product      : " + summary.alert4ProductCustomerCount + " / " + summary.alert4ProductCount);
     console.log("Excluded — insufficient history weeks   : " + summary.excludedInsufficientHistoricalWeeks);
     console.log("Excluded — total Actual equals zero     : " + summary.excludedZeroActual);
+    console.log("Excluded — below minimum volume         : " + summary.excludedBelowMinimumVolume +
+        "  (ALERT2_MIN_ACTUAL=" + ALERT2_MIN_ACTUAL + ", ALERT4_MIN_ACTUAL=" + ALERT4_MIN_ACTUAL + ")");
     console.log("Source KPI validation checks / mismatch : " + summary.sourceKpiValidationChecks + " / " + summary.sourceKpiValidationMismatches);
     console.log("Output worksheets                       : " + summary.outputWorksheets.join(", "));
 }
