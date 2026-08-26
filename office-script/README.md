@@ -59,7 +59,10 @@ Headers are matched after trimming and collapsing repeated internal spaces, so
   from the Product-Customer output.
 - Accuracy and Bias are **always recalculated** from underlying volumes at the exact
   entity level and period; source KPI columns are never averaged or summed.
-- `Accuracy = 1 - SUM(weekly ABS error) / SUM(weekly Actual)` — weekly errors are
+- `Accuracy = 1 - SUM(weekly ABS error) / SUM(weekly Forecast)` — the SAP IBP
+  convention `ABS(Forecast - Actual) / Forecast`, so the alerts match what
+  planners see in IBP. `ACCURACY_DENOMINATOR` switches it to `SUM(Actual)`.
+  Weekly errors are
   accumulated per week so positive and negative errors cannot cancel.
 - `Bias = SUM(Forecast - Actual) / SUM(Actual)`; positive = overforecast.
 - `Bias Deterioration = ABS(current Bias) - ABS(baseline Bias)` — movement away from zero.

@@ -2,7 +2,7 @@
  * ============================================================================
  * DEMAND PLANNING ALERTS  —  Microsoft Office Script (Excel Automate)
  * ============================================================================
- * Version  : 1.7
+ * Version  : 1.8
  * Runs on  : Excel for the web / desktop, Automate tab, "New Script"
  * Workbook : DemandAlertsScripts
  * Source   : worksheet "DBAlerts" (IBP CSV extract)
@@ -21,8 +21,12 @@
  *  - Accuracy and Bias are ALWAYS recalculated from the underlying volumes at
  *    the exact entity level and period analysed. Source Accuracy / Bias / Error
  *    Key Figures are used for VALIDATION ONLY (Product-Customer, single week).
- *  - Accuracy = 1 - SUM(weekly ABS error) / SUM(weekly Actual)
- *    (never ABS(SUM(Forecast) - SUM(Actual)) — weekly errors must not cancel).
+ *  - Accuracy = 1 - SUM(weekly ABS error) / SUM(weekly Forecast), matching the
+ *    SAP IBP convention  ABS(Forecast - Actual) / Forecast  so the alerts agree
+ *    with the figures planners already see in IBP. Switch ACCURACY_DENOMINATOR
+ *    to "actual" for the MAPE-style variant.
+ *    Either way the absolute error is accumulated PER WEEK — never
+ *    ABS(SUM(Forecast) - SUM(Actual)), which would let weekly errors cancel.
  *  - Bias     = SUM(Forecast - Actual) / SUM(Actual)   (+ = overforecast).
  *  - Bias deterioration = ABS(current Bias) - ABS(baseline Bias)  (away from 0).
  *  - Historical performance uses SNAPSHOT Key Figures, never current plan values.
@@ -135,9 +139,17 @@ const FUTURE_WEEKS: number = 12;     // keep W+1 .. W+12
  *              decimals across several customers and weeks. Use this to make the
  *              alerts agree with the figures planners already see in IBP.
  *
+ * ACTIVE: "forecast" — chosen so the alerts agree with IBP. A planner opening
+ * IBP after reading an alert must not find a different accuracy for the same
+ * SKU; that costs more trust than the theoretically cleaner formula earns.
+ *
+ * Consequence of "forecast": a combination with zero forecast has no calculable
+ * accuracy and is excluded, even when it had actual sales. Under "actual" the
+ * reverse holds. Both are correct — the denominator cannot be zero either way.
+ *
  * Bias is unaffected: it stays SUM(Forecast - Actual) / SUM(Actual) per spec.
  */
-const ACCURACY_DENOMINATOR: string = "actual";   // "actual" | "forecast"
+const ACCURACY_DENOMINATOR: string = "forecast";   // "actual" | "forecast"
 
 /** Cap recalculated Accuracy into [0%, 100%] (IBP convention). */
 const CAP_ACCURACY_0_100: boolean = true;

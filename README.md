@@ -47,11 +47,14 @@ them structurally rather than by convention:
   Product-Customer results.
 - Accuracy and bias are **always recalculated** from underlying volumes at the
   exact entity level and period. Source KPI columns are never averaged or summed.
-- `Accuracy = 1 - SUM(weekly ABS error) / SUM(weekly Actual)` — errors accumulate
-  per week so positive and negative weeks cannot cancel.
+- `Accuracy = 1 - SUM(weekly ABS error) / SUM(weekly Forecast)` — the SAP IBP
+  convention `ABS(Forecast - Actual) / Forecast`, so alerts agree with IBP.
+  Errors accumulate per week so positive and negative weeks cannot cancel.
+  `ACCURACY_DENOMINATOR` switches the denominator to `SUM(Actual)`.
 - `Bias = SUM(Forecast - Actual) / SUM(Actual)`; positive means over-forecast.
+  Unaffected by the accuracy denominator.
 - `Bias deterioration = ABS(current) - ABS(baseline)` — movement away from zero.
-- Zero Actual means the KPI is not calculable, not zero.
+- A zero denominator means the KPI is not calculable, not zero.
 - The current week is excluded from every historical and future calculation.
 - Accuracy and bias *differences* are percentage points, never percent.
 
