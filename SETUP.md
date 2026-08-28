@@ -859,6 +859,7 @@ guarantees. The spot-check in Phase 7 is what catches a drifting model.
 | Worksheet exists with no table | A write failed mid-publish. Re-run; lower `WRITE_CHUNK_CELLS`. See 1.4. |
 | Flow times out | Render cold start; raise the HTTP action's timeout. |
 | `Digest failed: GROQ_API_KEY is not set` | Env var missing on Render. |
+| `413 ... tokens per minute (TPM): Limit 8000, Requested 8480` | Groq bills prompt **plus the whole `max_tokens` reservation** against the per-minute cap. The client now caps the reservation to fit, but a very large brief leaves little room — lower `DEMAND_TOP_N` (try `5`). `GROQ_TPM_LIMIT` raises the assumed cap if the account is upgraded. |
 | Teams post stops mid-sentence, later alerts missing | The narrative hit the model's output-token limit. Raise `DEMAND_MAX_OUTPUT_TOKENS`, or lower `DEMAND_TOP_N` to shorten the brief. The service now retries once with a bigger budget and logs `WARNING: the narrative was still truncated` if it remains cut. |
 | `model_not_found` / `does not exist or you do not have access` | Groq retired the model id. List current ones with `GET https://api.groq.com/openai/v1/models` (Bearer your key) and update `GROQ_CHAT_MODEL`. The Llama 3.x line disappeared in Aug 2026. |
 | HTTP step runs for minutes without finishing | Render free-tier cold start (~30 s) plus snapshot writes on a large payload. Raise the HTTP action's timeout; watch the Render logs to confirm it is progressing rather than stuck. |

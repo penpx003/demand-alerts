@@ -290,7 +290,38 @@ check("a complete answer is not retried", len(fake3.budgets) == 1)
 
 c4, fake4 = _client([("cut", "length")])
 c4.generate("p", max_output_tokens=MAX_TOKEN_CEILING)
-check("budget never exceeds the ceiling", max(fake4.budgets) == MAX_TOKEN_CEILING)
+check("budget never exceeds the ceiling", max(fake4.budgets) <= MAX_TOKEN_CEILING)
+
+print("\ntokens-per-minute budgeting")
+from digest.llm import TPM_LIMIT, TPM_SAFETY_MARGIN, MIN_OUTPUT_BUDGET, estimate_tokens  # noqa: E402
+
+# Groq bills prompt + the whole max_tokens reservation against the TPM cap, so
+# a big brief plus a generous budget is rejected outright with a 413.
+big_prompt = "x" * (4 * 4480)          # ~4480 tokens, the size that failed live
+c5, fake5 = _client([("ok", "stop")])
+c5.generate(big_prompt, max_output_tokens=4000)
+asked = fake5.budgets[0]
+check("budget is capped for a large brief", asked < 4000, f"asked {asked}")
+check(
+    "prompt + reservation fits under the TPM limit",
+    estimate_tokens(big_prompt) + asked <= TPM_LIMIT - TPM_SAFETY_MARGIN + 1,
+    f"{estimate_tokens(big_prompt)} + {asked} vs {TPM_LIMIT}",
+)
+
+# A small brief must not be capped at all.
+c6, fake6 = _client([("ok", "stop")])
+c6.generate("short brief", max_output_tokens=4000)
+check("a small brief keeps the full budget", fake6.budgets[0] == 4000, str(fake6.budgets))
+
+# Growing after truncation must also respect the cap.
+c7, fake7 = _client([("cut", "length"), ("done", "stop")])
+c7.generate(big_prompt, max_output_tokens=2000)
+check("the enlarged retry still fits", estimate_tokens(big_prompt) + max(fake7.budgets) <= TPM_LIMIT)
+
+# An oversized brief still attempts something rather than dividing by zero.
+c8, fake8 = _client([("ok", "stop")])
+c8.generate("y" * (4 * TPM_LIMIT), max_output_tokens=4000)
+check("an oversized brief falls back to the floor", fake8.budgets[0] == MIN_OUTPUT_BUDGET)
 
 print("\nendpoint")
 os.environ["DEMAND_DIGEST_TOKEN"] = "self-test-token"
