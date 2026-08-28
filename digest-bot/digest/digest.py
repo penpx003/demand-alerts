@@ -47,6 +47,11 @@ TREND_WEEKS = int(os.getenv("DEMAND_TREND_WEEKS", "8"))
 # growth on a free Supabase project.
 SNAPSHOT_PC_LIMIT = int(os.getenv("DEMAND_SNAPSHOT_PC_LIMIT", "500"))
 TOP_N = int(os.getenv("DEMAND_TOP_N", "8"))
+# Output budget for the narrative. Generous on purpose: this runs weekly with no
+# latency pressure, and a budget that is too small truncates the digest silently
+# — the post simply stops mid-sentence with later alerts missing. Reasoning
+# models spend part of this allowance before writing anything visible.
+MAX_OUTPUT_TOKENS = int(os.getenv("DEMAND_MAX_OUTPUT_TOKENS", "4000"))
 
 
 _COUNTRY_RE = re.compile(r"[^A-Z0-9 _-]+")
@@ -443,7 +448,7 @@ def generate_narrative(cfg: Config, brief: str) -> tuple[str, str]:
     # No reply deadline here — this runs on a weekly schedule, so a full-quality
     # generation is affordable (unlike a Teams Outgoing Webhook, capped at ~5s).
     client = GroqClient(cfg)
-    text = client.generate(PROMPT.format(brief=brief), max_output_tokens=1400)
+    text = client.generate(PROMPT.format(brief=brief), max_output_tokens=MAX_OUTPUT_TOKENS)
     return text.strip(), cfg.groq_model
 
 

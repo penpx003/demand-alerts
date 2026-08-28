@@ -124,6 +124,7 @@ A week with no alerts at all skips the LLM entirely and returns a fixed message.
 | `DEMAND_TOP_N` | `8` | Items per alert and level in the brief |
 | `GROQ_CHAT_MODEL` | `openai/gpt-oss-120b` | Generation model. Groq retires ids without notice — check `/v1/models` if it 404s |
 | `WORKBOOK_URL` | *(blank)* | Adds "Open the alert workbook" to the digest. http(s) only; blank omits it |
+| `DEMAND_MAX_OUTPUT_TOKENS` | `4000` | Narrative output budget. Too small truncates the post silently |
 
 Too noisy? Raise the thresholds in the **Office Script**, not here — the digest
 narrates whatever the alerts contain. Different tone or sections? Edit `PROMPT` in

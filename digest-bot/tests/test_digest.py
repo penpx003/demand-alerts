@@ -243,6 +243,55 @@ check("rejected URL produces no anchor", "<a href" not in htm3)
 _, htm4 = append_workbook_link("x", "<p>x</p>", 'https://e.com/a.xlsx?a=1&b="2"')
 check("URL is attribute-escaped", "&amp;" in htm4 and '&quot;' in htm4)
 
+print("\ntruncated generation")
+from digest.llm import GroqClient, MAX_TOKEN_CEILING  # noqa: E402
+
+
+class _FakeCompletions:
+    """Replays a scripted sequence of (text, finish_reason) responses."""
+
+    def __init__(self, script):
+        self.script = script
+        self.budgets = []
+
+    def create(self, **kw):
+        self.budgets.append(kw["max_tokens"])
+        text, finish = self.script[min(len(self.budgets) - 1, len(self.script) - 1)]
+        choice = type("C", (), {"message": type("M", (), {"content": text})(),
+                                "finish_reason": finish})()
+        return type("R", (), {"choices": [choice]})()
+
+
+def _client(script):
+    """A GroqClient with the network replaced — no key, no config, no calls."""
+    c = GroqClient.__new__(GroqClient)
+    c.cfg = type("Cfg", (), {"groq_model": "test-model"})()
+    fake = _FakeCompletions(script)
+    c.client = type("G", (), {"chat": type("Ch", (), {"completions": fake})()})()
+    return c, fake
+
+
+# A completion cut off at the token limit returns 200 and reads normally, so it
+# must be detected and retried rather than published as a short digest.
+c, fake = _client([("cut off mid-sen", "length"), ("the whole thing", "stop")])
+out = c.generate("p", max_output_tokens=1000)
+check("truncated answer is retried", len(fake.budgets) == 2)
+check("retry asks for a bigger budget", fake.budgets[1] > fake.budgets[0], str(fake.budgets))
+check("the complete answer is returned", out == "the whole thing")
+
+c2, fake2 = _client([("still cut", "length")])
+out2 = c2.generate("p", max_output_tokens=1000)
+check("gives up after one enlargement", len(fake2.budgets) == 2)
+check("partial text returned rather than nothing", out2 == "still cut")
+
+c3, fake3 = _client([("fine", "stop")])
+c3.generate("p", max_output_tokens=1000)
+check("a complete answer is not retried", len(fake3.budgets) == 1)
+
+c4, fake4 = _client([("cut", "length")])
+c4.generate("p", max_output_tokens=MAX_TOKEN_CEILING)
+check("budget never exceeds the ceiling", max(fake4.budgets) == MAX_TOKEN_CEILING)
+
 print("\nendpoint")
 os.environ["DEMAND_DIGEST_TOKEN"] = "self-test-token"
 try:
